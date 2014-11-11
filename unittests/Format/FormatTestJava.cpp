@@ -37,7 +37,7 @@ protected:
     return format(Code, 0, Code.size(), Style);
   }
 
-  static FormatStyle getGoogleJSStyleWithColumns(unsigned ColumnLimit) {
+  static FormatStyle getStyleWithColumns(unsigned ColumnLimit) {
     FormatStyle Style = getGoogleStyle(FormatStyle::LK_Java);
     Style.ColumnLimit = ColumnLimit;
     return Style;
@@ -63,6 +63,150 @@ TEST_F(FormatTestJava, ClassDeclarations) {
                "    int j;\n"
                "  }\n"
                "}");
+  verifyFormat("public class A extends B.C {}");
+
+  verifyFormat("abstract class SomeClass extends SomeOtherClass\n"
+               "    implements SomeInterface {}",
+               getStyleWithColumns(60));
+  verifyFormat("abstract class SomeClass\n"
+               "    extends SomeOtherClass\n"
+               "    implements SomeInterface {}",
+               getStyleWithColumns(40));
+  verifyFormat("abstract class SomeClass\n"
+               "    extends SomeOtherClass\n"
+               "    implements SomeInterface,\n"
+               "               AnotherInterface {}",
+               getStyleWithColumns(40));
+  verifyFormat("@SomeAnnotation()\n"
+               "abstract class aaaaaaaaaaaa extends bbbbbbbbbbbbbbb\n"
+               "    implements cccccccccccc {\n"
+               "}",
+               getStyleWithColumns(76));
+  verifyFormat("@SomeAnnotation()\n"
+               "abstract class aaaaaaaaa<a> extends bbbbbbbbbbbb<b>\n"
+               "    implements cccccccccccc {\n"
+               "}",
+               getStyleWithColumns(76));
+  verifyFormat("interface SomeInterface<A> extends Foo, Bar {\n"
+               "  void doStuff(int theStuff);\n"
+               "  void doMoreStuff(int moreStuff);\n"
+               "}");
+  verifyFormat("public interface SomeInterface {\n"
+               "  void doStuff(int theStuff);\n"
+               "  void doMoreStuff(int moreStuff);\n"
+               "}");
+  verifyFormat("@interface SomeInterface {\n"
+               "  void doStuff(int theStuff);\n"
+               "  void doMoreStuff(int moreStuff);\n"
+               "}");
+  verifyFormat("public @interface SomeInterface {\n"
+               "  void doStuff(int theStuff);\n"
+               "  void doMoreStuff(int moreStuff);\n"
+               "}");
+}
+
+TEST_F(FormatTestJava, EnumDeclarations) {
+  verifyFormat("enum SomeThing { ABC, CDE }");
+  verifyFormat("enum SomeThing {\n"
+               "  ABC,\n"
+               "  CDE,\n"
+               "}");
+  verifyFormat("public class SomeClass {\n"
+               "  enum SomeThing { ABC, CDE }\n"
+               "  void f() {\n"
+               "  }\n"
+               "}");
+}
+
+TEST_F(FormatTestJava, ThrowsDeclarations) {
+  verifyFormat("public void doSooooooooooooooooooooooooooomething()\n"
+               "    throws LooooooooooooooooooooooooooooongException {\n}");
+}
+
+TEST_F(FormatTestJava, Annotations) {
+  verifyFormat("@Override\n"
+               "public String toString() {\n}");
+  verifyFormat("@Override\n"
+               "@Nullable\n"
+               "public String getNameIfPresent() {\n}");
+
+  verifyFormat("@SuppressWarnings(value = \"unchecked\")\n"
+               "public void doSomething() {\n}");
+  verifyFormat("@SuppressWarnings(value = \"unchecked\")\n"
+               "@Author(name = \"abc\")\n"
+               "public void doSomething() {\n}");
+
+  verifyFormat("DoSomething(new A() {\n"
+               "  @Override\n"
+               "  public String toString() {\n"
+               "  }\n"
+               "});");
+
+  verifyFormat("void SomeFunction(@Nullable String something) {\n"
+               "}");
+
+  verifyFormat("@Partial @Mock DataLoader loader;");
+  verifyFormat("@SuppressWarnings(value = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\")\n"
+               "public static int iiiiiiiiiiiiiiiiiiiiiiii;");
+
+  verifyFormat("@SomeAnnotation(\"With some really looooooooooooooong text\")\n"
+               "private static final long something = 0L;");
+}
+
+TEST_F(FormatTestJava, Generics) {
+  verifyFormat("Iterable<?> a;");
+  verifyFormat("Iterable<?> a;");
+  verifyFormat("Iterable<? extends SomeObject> a;");
+
+  verifyFormat("A.<B>doSomething();");
+
+  verifyFormat("@Override\n"
+               "public Map<String, ?> getAll() {\n}");
+
+  verifyFormat("public static <R> ArrayList<R> get() {\n}");
+  verifyFormat("<T extends B> T getInstance(Class<T> type);");
+}
+
+TEST_F(FormatTestJava, StringConcatenation) {
+  verifyFormat("String someString = \"abc\"\n"
+               "                    + \"cde\";");
+}
+
+TEST_F(FormatTestJava, TryCatchFinally) {
+  verifyFormat("try {\n"
+               "  Something();\n"
+               "} catch (SomeException e) {\n"
+               "  HandleException(e);\n"
+               "}");
+  verifyFormat("try {\n"
+               "  Something();\n"
+               "} finally {\n"
+               "  AlwaysDoThis();\n"
+               "}");
+  verifyFormat("try {\n"
+               "  Something();\n"
+               "} catch (SomeException e) {\n"
+               "  HandleException(e);\n"
+               "} finally {\n"
+               "  AlwaysDoThis();\n"
+               "}");
+
+  verifyFormat("try {\n"
+               "  Something();\n"
+               "} catch (SomeException | OtherException e) {\n"
+               "  HandleException(e);\n"
+               "}");
+}
+
+TEST_F(FormatTestJava, SynchronizedKeyword) {
+  verifyFormat("synchronized (mData) {\n"
+               "  // ...\n"
+               "}");
+}
+
+TEST_F(FormatTestJava, ImportDeclarations) {
+  verifyFormat("import some.really.loooooooooooooooooooooong.imported.Class;",
+               getStyleWithColumns(50));
 }
 
 } // end namespace tooling

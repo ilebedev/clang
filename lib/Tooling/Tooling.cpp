@@ -69,7 +69,7 @@ static const llvm::opt::ArgStringList *getCC1Arguments(
   // We expect to get back exactly one Command job, if we didn't something
   // failed. Extract that job from the Compilation.
   const clang::driver::JobList &Jobs = Compilation->getJobs();
-  if (Jobs.size() != 1 || !isa<clang::driver::Command>(**Jobs.begin())) {
+  if (Jobs.size() != 1 || !isa<clang::driver::Command>(*Jobs.begin())) {
     SmallString<256> error_msg;
     llvm::raw_svector_ostream error_stream(error_msg);
     Jobs.Print(error_stream, "; ", true);
@@ -80,7 +80,7 @@ static const llvm::opt::ArgStringList *getCC1Arguments(
 
   // The one job we find should be to invoke clang again.
   const clang::driver::Command &Cmd =
-      cast<clang::driver::Command>(**Jobs.begin());
+      cast<clang::driver::Command>(*Jobs.begin());
   if (StringRef(Cmd.getCreator().getName()) != "clang") {
     Diagnostics->Report(clang::diag::err_fe_expected_clang_command);
     return nullptr;
@@ -301,10 +301,21 @@ int ClangTool::run(ToolAction *Action) {
   std::string MainExecutable =
       llvm::sys::fs::getMainExecutable("clang_tool", &StaticSymbol);
 
+  llvm::SmallString<128> InitialDirectory;
+  if (std::error_code EC = llvm::sys::fs::current_path(InitialDirectory))
+    llvm::report_fatal_error("Cannot detect current path: " +
+                             Twine(EC.message()));
   bool ProcessingFailed = false;
   for (const auto &SourcePath : SourcePaths) {
     std::string File(getAbsolutePath(SourcePath));
 
+    // Currently implementations of CompilationDatabase::getCompileCommands can
+    // change the state of the file system (e.g.  prepare generated headers), so
+    // this method needs to run right before we invoke the tool, as the next
+    // file may require a different (incompatible) state of the file system.
+    //
+    // FIXME: Make the compilation database interface more explicit about the
+    // requirements to the order of invocation of its members.
     std::vector<CompileCommand> CompileCommandsForFile =
         Compilations.getCompileCommands(File);
     if (CompileCommandsForFile.empty()) {
@@ -337,14 +348,18 @@ int ClangTool::run(ToolAction *Action) {
       DEBUG({ llvm::dbgs() << "Processing: " << File << ".\n"; });
       ToolInvocation Invocation(std::move(CommandLine), Action, Files.get());
       Invocation.setDiagnosticConsumer(DiagConsumer);
-      for (const auto &MappedFile : MappedFileContents) {
+      for (const auto &MappedFile : MappedFileContents)
         Invocation.mapVirtualFile(MappedFile.first, MappedFile.second);
-      }
       if (!Invocation.run()) {
         // FIXME: Diagnostics should be used instead.
         llvm::errs() << "Error while processing " << File << ".\n";
         ProcessingFailed = true;
       }
+      // Return to the initial directory to correctly resolve next file by
+      // relative path.
+      if (chdir(InitialDirectory.c_str()))
+        llvm::report_fatal_error("Cannot chdir into \"" +
+                                 Twine(InitialDirectory) + "\n!");
     }
   }
   return ProcessingFailed ? 1 : 0;

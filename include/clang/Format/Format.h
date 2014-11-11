@@ -15,8 +15,9 @@
 #ifndef LLVM_CLANG_FORMAT_FORMAT_H
 #define LLVM_CLANG_FORMAT_FORMAT_H
 
-#include "clang/Frontend/FrontendAction.h"
-#include "clang/Tooling/Refactoring.h"
+#include "clang/Basic/LangOptions.h"
+#include "clang/Tooling/Core/Replacement.h"
+#include "llvm/ADT/ArrayRef.h"
 #include <system_error>
 
 namespace clang {
@@ -152,9 +153,13 @@ struct FormatStyle {
   /// commonly have different usage patterns and a number of special cases.
   unsigned SpacesBeforeTrailingComments;
 
-  /// \brief If \c false, a function call's or function definition's parameters
-  /// will either all be on the same line or will have one line each.
+  /// \brief If \c false, a function declaration's or function definition's
+  /// parameters will either all be on the same line or will have one line each.
   bool BinPackParameters;
+
+  /// \brief If \c false, a function call's arguments will either be all on the
+  /// same line or will have one line each.
+  bool BinPackArguments;
 
   /// \brief If \c true, clang-format detects whether function calls and
   /// definitions are formatted with one parameter per line.
@@ -239,6 +244,9 @@ struct FormatStyle {
   /// \brief The number of characters to use for indentation of constructor
   /// initializer lists.
   unsigned ConstructorInitializerIndentWidth;
+
+  /// \brief The number of characters to use for indentation of ObjC blocks.
+  unsigned ObjCBlockIndentWidth;
 
   /// \brief If \c true, always break after function definition return types.
   ///
@@ -386,8 +394,6 @@ struct FormatStyle {
 
   bool operator==(const FormatStyle &R) const {
     return AccessModifierOffset == R.AccessModifierOffset &&
-           ConstructorInitializerIndentWidth ==
-               R.ConstructorInitializerIndentWidth &&
            AlignEscapedNewlinesLeft == R.AlignEscapedNewlinesLeft &&
            AlignTrailingComments == R.AlignTrailingComments &&
            AllowAllParametersOfDeclarationOnNextLine ==
@@ -405,6 +411,7 @@ struct FormatStyle {
            AlwaysBreakBeforeMultilineStrings ==
                R.AlwaysBreakBeforeMultilineStrings &&
            BinPackParameters == R.BinPackParameters &&
+           BinPackArguments == R.BinPackArguments &&
            BreakBeforeBinaryOperators == R.BreakBeforeBinaryOperators &&
            BreakBeforeTernaryOperators == R.BreakBeforeTernaryOperators &&
            BreakBeforeBraces == R.BreakBeforeBraces &&
@@ -413,6 +420,8 @@ struct FormatStyle {
            ColumnLimit == R.ColumnLimit &&
            ConstructorInitializerAllOnOneLineOrOnePerLine ==
                R.ConstructorInitializerAllOnOneLineOrOnePerLine &&
+           ConstructorInitializerIndentWidth ==
+               R.ConstructorInitializerIndentWidth &&
            DerivePointerAlignment == R.DerivePointerAlignment &&
            ExperimentalAutoDetectBinPacking ==
                R.ExperimentalAutoDetectBinPacking &&
@@ -423,6 +432,7 @@ struct FormatStyle {
            KeepEmptyLinesAtTheStartOfBlocks ==
                R.KeepEmptyLinesAtTheStartOfBlocks &&
            NamespaceIndentation == R.NamespaceIndentation &&
+           ObjCBlockIndentWidth == R.ObjCBlockIndentWidth &&
            ObjCSpaceAfterProperty == R.ObjCSpaceAfterProperty &&
            ObjCSpaceBeforeProtocolList == R.ObjCSpaceBeforeProtocolList &&
            PenaltyBreakComment == R.PenaltyBreakComment &&
@@ -505,7 +515,7 @@ std::string configurationAsText(const FormatStyle &Style);
 /// DEPRECATED: Do not use.
 tooling::Replacements reformat(const FormatStyle &Style, Lexer &Lex,
                                SourceManager &SourceMgr,
-                               std::vector<CharSourceRange> Ranges);
+                               ArrayRef<CharSourceRange> Ranges);
 
 /// \brief Reformats the given \p Ranges in the file \p ID.
 ///
@@ -517,13 +527,13 @@ tooling::Replacements reformat(const FormatStyle &Style, Lexer &Lex,
 /// \p Style.
 tooling::Replacements reformat(const FormatStyle &Style,
                                SourceManager &SourceMgr, FileID ID,
-                               std::vector<CharSourceRange> Ranges);
+                               ArrayRef<CharSourceRange> Ranges);
 
 /// \brief Reformats the given \p Ranges in \p Code.
 ///
 /// Otherwise identical to the reformat() function consuming a \c Lexer.
 tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
-                               std::vector<tooling::Range> Ranges,
+                               ArrayRef<tooling::Range> Ranges,
                                StringRef FileName = "<stdin>");
 
 /// \brief Returns the \c LangOpts that the formatter expects you to set.

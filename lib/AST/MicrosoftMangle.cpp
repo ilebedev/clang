@@ -160,7 +160,7 @@ public:
     unsigned &discriminator = Uniquifier[ND];
     if (!discriminator)
       discriminator = ++Discriminator[std::make_pair(DC, ND->getIdentifier())];
-    disc = discriminator;
+    disc = discriminator + 1;
     return true;
   }
 
@@ -441,7 +441,7 @@ void MicrosoftCXXNameMangler::mangleVariableEncoding(const VarDecl *VD) {
       mangleQualifiers(Ty.getQualifiers(), false);
   } else {
     mangleType(Ty, SR, QMM_Drop);
-    mangleQualifiers(Ty.getLocalQualifiers(), false);
+    mangleQualifiers(Ty.getQualifiers(), false);
   }
 }
 
@@ -1139,7 +1139,7 @@ void MicrosoftCXXNameMangler::mangleTemplateArg(const TemplateDecl *TD,
       else
         mangle(FD, "$1?");
     } else {
-      mangle(ND, TA.isDeclForReferenceParam() ? "$E?" : "$1?");
+      mangle(ND, TA.getParamTypeForDecl()->isReferenceType() ? "$E?" : "$1?");
     }
     break;
   }
@@ -1687,6 +1687,7 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(const FunctionType *T) {
   //                      ::= H # __export __stdcall
   //                      ::= I # __fastcall
   //                      ::= J # __export __fastcall
+  //                      ::= Q # __vectorcall
   // The 'export' calling conventions are from a bygone era
   // (*cough*Win16*cough*) when functions were declared for export with
   // that keyword. (It didn't actually export them, it just made them so
@@ -1703,6 +1704,7 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(const FunctionType *T) {
     case CC_X86ThisCall: Out << 'E'; break;
     case CC_X86StdCall: Out << 'G'; break;
     case CC_X86FastCall: Out << 'I'; break;
+    case CC_X86VectorCall: Out << 'Q'; break;
   }
 }
 void MicrosoftCXXNameMangler::mangleThrowSpecification(
@@ -2348,7 +2350,7 @@ void MicrosoftMangleContextImpl::mangleReferenceTemporary(const VarDecl *VD,
 
 void MicrosoftMangleContextImpl::mangleStaticGuardVariable(const VarDecl *VD,
                                                            raw_ostream &Out) {
-  // TODO: This is not correct, especially with respect to MSVC2013.  MSVC2013
+  // TODO: This is not correct, especially with respect to VS "14".  VS "14"
   // utilizes thread local variables to implement thread safe, re-entrant
   // initialization for statics.  They no longer differentiate between an
   // externally visible and non-externally visible static with respect to

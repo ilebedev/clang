@@ -637,13 +637,11 @@ void CXXNameMangler::mangleUnscopedTemplateName(const TemplateDecl *ND) {
     return;
 
   // <template-template-param> ::= <template-param>
-  if (const TemplateTemplateParmDecl *TTP
-                                     = dyn_cast<TemplateTemplateParmDecl>(ND)) {
+  if (const auto *TTP = dyn_cast<TemplateTemplateParmDecl>(ND))
     mangleTemplateParameter(TTP->getIndex());
-    return;
-  }
+  else
+    mangleUnscopedName(ND->getTemplatedDecl());
 
-  mangleUnscopedName(ND->getTemplatedDecl());
   addSubstitution(ND);
 }
 
@@ -1563,14 +1561,13 @@ void CXXNameMangler::mangleTemplatePrefix(const TemplateDecl *ND,
     return;
 
   // <template-template-param> ::= <template-param>
-  if (const TemplateTemplateParmDecl *TTP
-                                     = dyn_cast<TemplateTemplateParmDecl>(ND)) {
+  if (const auto *TTP = dyn_cast<TemplateTemplateParmDecl>(ND)) {
     mangleTemplateParameter(TTP->getIndex());
-    return;
+  } else {
+    manglePrefix(getEffectiveDeclContext(ND), NoFunction);
+    mangleUnqualifiedName(ND->getTemplatedDecl());
   }
 
-  manglePrefix(getEffectiveDeclContext(ND), NoFunction);
-  mangleUnqualifiedName(ND->getTemplatedDecl());
   addSubstitution(ND);
 }
 
@@ -2630,6 +2627,7 @@ recurse:
   case Expr::ParenListExprClass:
   case Expr::LambdaExprClass:
   case Expr::MSPropertyRefExprClass:
+  case Expr::TypoExprClass:  // This should no longer exist in the AST by now.
     llvm_unreachable("unexpected statement kind");
 
   // FIXME: invent manglings for all these.
@@ -3211,12 +3209,33 @@ recurse:
       mangleFunctionParam(cast<ParmVarDecl>(Pack));
     break;
   }
-      
+
   case Expr::MaterializeTemporaryExprClass: {
     mangleExpression(cast<MaterializeTemporaryExpr>(E)->GetTemporaryExpr());
     break;
   }
-      
+
+  case Expr::CXXFoldExprClass: {
+    auto *FE = cast<CXXFoldExpr>(E);
+    if (FE->isLeftFold())
+      Out << (FE->getInit() ? "fL" : "fl");
+    else
+      Out << (FE->getInit() ? "fR" : "fr");
+
+    if (FE->getOperator() == BO_PtrMemD)
+      Out << "ds";
+    else
+      mangleOperatorName(
+          BinaryOperator::getOverloadedOperator(FE->getOperator()),
+          /*Arity=*/2);
+
+    if (FE->getLHS())
+      mangleExpression(FE->getLHS());
+    if (FE->getRHS())
+      mangleExpression(FE->getRHS());
+    break;
+  }
+
   case Expr::CXXThisExprClass:
     Out << "fpT";
     break;
@@ -3403,7 +3422,7 @@ void CXXNameMangler::mangleTemplateArg(TemplateArgument A) {
     // and pointer-to-function expressions are represented as a declaration not
     // an expression. We compensate for it here to produce the correct mangling.
     ValueDecl *D = A.getAsDecl();
-    bool compensateMangling = !A.isDeclForReferenceParam();
+    bool compensateMangling = !A.getParamTypeForDecl()->isReferenceType();
     if (compensateMangling) {
       Out << 'X';
       mangleOperatorName(OO_Amp, 1);

@@ -140,10 +140,7 @@ typedef internal::Matcher<NestedNameSpecifierLoc> NestedNameSpecifierLocMatcher;
 /// \endcode
 ///
 /// Usable as: Any Matcher
-inline internal::PolymorphicMatcherWithParam0<internal::TrueMatcher>
-anything() {
-  return internal::PolymorphicMatcherWithParam0<internal::TrueMatcher>();
-}
+inline internal::TrueMatcher anything() { return internal::TrueMatcher(); }
 
 /// \brief Matches declarations.
 ///
@@ -273,6 +270,17 @@ const internal::VariadicDynCastAllOfMatcher<
 ///   };
 /// \endcode
 const internal::VariadicAllOfMatcher<CXXCtorInitializer> ctorInitializer;
+
+/// \brief Matches template arguments.
+///
+/// Given
+/// \code
+///   template <typename T> struct C {};
+///   C<int> c;
+/// \endcode
+/// templateArgument()
+///   matches 'int' in C<int>.
+const internal::VariadicAllOfMatcher<TemplateArgument> templateArgument;
 
 /// \brief Matches public C++ declarations.
 ///
@@ -452,6 +460,23 @@ AST_POLYMORPHIC_MATCHER_P2(
   return InnerMatcher.matches(List[N], Finder, Builder);
 }
 
+/// \brief Matches if the number of template arguments equals \p N.
+///
+/// Given
+/// \code
+///   template<typename T> struct C {};
+///   C<int> c;
+/// \endcode
+/// classTemplateSpecializationDecl(templateArgumentCountIs(1))
+///   matches C<int>.
+AST_POLYMORPHIC_MATCHER_P(
+    templateArgumentCountIs,
+    AST_POLYMORPHIC_SUPPORTED_TYPES_2(ClassTemplateSpecializationDecl,
+                                      TemplateSpecializationType),
+    unsigned, N) {
+  return internal::getTemplateSpecializationArgs(Node).size() == N;
+}
+
 /// \brief Matches a TemplateArgument that refers to a certain type.
 ///
 /// Given
@@ -507,6 +532,68 @@ AST_MATCHER_P(TemplateArgument, isExpr, internal::Matcher<Expr>, InnerMatcher) {
     return InnerMatcher.matches(*Node.getAsExpr(), Finder, Builder);
   return false;
 }
+
+/// \brief Matches a TemplateArgument that is an integral value.
+///
+/// Given
+/// \code
+///   template<int T> struct A {};
+///   C<42> c;
+/// \endcode
+/// classTemplateSpecializationDecl(
+///   hasAnyTemplateArgument(isIntegral()))
+///   matches the implicit instantiation of C in C<42>
+///   with isIntegral() matching 42.
+AST_MATCHER(TemplateArgument, isIntegral) {
+  return Node.getKind() == TemplateArgument::Integral;
+}
+
+/// \brief Matches a TemplateArgument that referes to an integral type.
+///
+/// Given
+/// \code
+///   template<int T> struct A {};
+///   C<42> c;
+/// \endcode
+/// classTemplateSpecializationDecl(
+///   hasAnyTemplateArgument(refersToIntegralType(asString("int"))))
+///   matches the implicit instantiation of C in C<42>.
+AST_MATCHER_P(TemplateArgument, refersToIntegralType,
+              internal::Matcher<QualType>, InnerMatcher) {
+  if (Node.getKind() != TemplateArgument::Integral)
+    return false;
+  return InnerMatcher.matches(Node.getIntegralType(), Finder, Builder);
+}
+
+/// \brief Matches a TemplateArgument of integral type with a given value.
+///
+/// Note that 'Value' is a string as the template argument's value is
+/// an arbitrary precision integer. 'Value' must be euqal to the canonical
+/// representation of that integral value in base 10.
+///
+/// Given
+/// \code
+///   template<int T> struct A {};
+///   C<42> c;
+/// \endcode
+/// classTemplateSpecializationDecl(
+///   hasAnyTemplateArgument(equalsIntegralValue("42")))
+///   matches the implicit instantiation of C in C<42>.
+AST_MATCHER_P(TemplateArgument, equalsIntegralValue,
+              std::string, Value) {
+  if (Node.getKind() != TemplateArgument::Integral)
+    return false;
+  return Node.getAsIntegral().toString(10) == Value;
+}
+
+/// \brief Matches any value declaration.
+///
+/// Example matches A, B, C and F
+/// \code
+///   enum X { A, B, C };
+///   void F();
+/// \endcode
+const internal::VariadicDynCastAllOfMatcher<Decl, ValueDecl> valueDecl;
 
 /// \brief Matches C++ constructor declarations.
 ///
@@ -1513,16 +1600,8 @@ inline internal::Matcher<Stmt> sizeOfExpr(
 /// \code
 ///   namespace a { namespace b { class X; } }
 /// \endcode
-AST_MATCHER_P(NamedDecl, hasName, std::string, Name) {
-  assert(!Name.empty());
-  const std::string FullNameString = "::" + Node.getQualifiedNameAsString();
-  const StringRef FullName = FullNameString;
-  const StringRef Pattern = Name;
-  if (Pattern.startswith("::")) {
-    return FullName == Pattern;
-  } else {
-    return FullName.endswith(("::" + Pattern).str());
-  }
+inline internal::Matcher<NamedDecl> hasName(const std::string &Name) {
+  return internal::Matcher<NamedDecl>(new internal::HasNameMatcher(Name));
 }
 
 /// \brief Matches NamedDecl nodes whose fully qualified names contain
@@ -2292,10 +2371,9 @@ AST_MATCHER(CXXCtorInitializer, isWritten) {
 AST_POLYMORPHIC_MATCHER_P(hasAnyArgument, AST_POLYMORPHIC_SUPPORTED_TYPES_2(
                                               CallExpr, CXXConstructExpr),
                           internal::Matcher<Expr>, InnerMatcher) {
-  for (unsigned I = 0; I < Node.getNumArgs(); ++I) {
+  for (const Expr *Arg : Node.arguments()) {
     BoundNodesTreeBuilder Result(*Builder);
-    if (InnerMatcher.matches(*Node.getArg(I)->IgnoreParenImpCasts(), Finder,
-                             &Result)) {
+    if (InnerMatcher.matches(*Arg->IgnoreParenImpCasts(), Finder, &Result)) {
       *Builder = std::move(Result);
       return true;
     }
@@ -3498,8 +3576,9 @@ AST_MATCHER_P(ElaboratedType, namesType, internal::Matcher<QualType>,
 /// \c recordDecl(hasDeclContext(namedDecl(hasName("M")))) matches the
 /// declaration of \c class \c D.
 AST_MATCHER_P(Decl, hasDeclContext, internal::Matcher<Decl>, InnerMatcher) {
-  return InnerMatcher.matches(*Decl::castFromDeclContext(Node.getDeclContext()),
-                              Finder, Builder);
+  const DeclContext *DC = Node.getDeclContext();
+  if (!DC) return false;
+  return InnerMatcher.matches(*Decl::castFromDeclContext(DC), Finder, Builder);
 }
 
 /// \brief Matches nested name specifiers.

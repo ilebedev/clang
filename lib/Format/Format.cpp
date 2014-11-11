@@ -170,8 +170,6 @@ template <> struct MappingTraits<FormatStyle> {
     }
 
     IO.mapOptional("AccessModifierOffset", Style.AccessModifierOffset);
-    IO.mapOptional("ConstructorInitializerIndentWidth",
-                   Style.ConstructorInitializerIndentWidth);
     IO.mapOptional("AlignEscapedNewlinesLeft", Style.AlignEscapedNewlinesLeft);
     IO.mapOptional("AlignTrailingComments", Style.AlignTrailingComments);
     IO.mapOptional("AllowAllParametersOfDeclarationOnNextLine",
@@ -199,9 +197,12 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("BreakConstructorInitializersBeforeComma",
                    Style.BreakConstructorInitializersBeforeComma);
     IO.mapOptional("BinPackParameters", Style.BinPackParameters);
+    IO.mapOptional("BinPackArguments", Style.BinPackArguments);
     IO.mapOptional("ColumnLimit", Style.ColumnLimit);
     IO.mapOptional("ConstructorInitializerAllOnOneLineOrOnePerLine",
                    Style.ConstructorInitializerAllOnOneLineOrOnePerLine);
+    IO.mapOptional("ConstructorInitializerIndentWidth",
+                   Style.ConstructorInitializerIndentWidth);
     IO.mapOptional("DerivePointerAlignment", Style.DerivePointerAlignment);
     IO.mapOptional("ExperimentalAutoDetectBinPacking",
                    Style.ExperimentalAutoDetectBinPacking);
@@ -214,6 +215,7 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("KeepEmptyLinesAtTheStartOfBlocks",
                    Style.KeepEmptyLinesAtTheStartOfBlocks);
     IO.mapOptional("NamespaceIndentation", Style.NamespaceIndentation);
+    IO.mapOptional("ObjCBlockIndentWidth", Style.ObjCBlockIndentWidth);
     IO.mapOptional("ObjCSpaceAfterProperty", Style.ObjCSpaceAfterProperty);
     IO.mapOptional("ObjCSpaceBeforeProtocolList",
                    Style.ObjCSpaceBeforeProtocolList);
@@ -333,6 +335,7 @@ FormatStyle getLLVMStyle() {
   LLVMStyle.AlwaysBreakBeforeMultilineStrings = false;
   LLVMStyle.AlwaysBreakTemplateDeclarations = false;
   LLVMStyle.BinPackParameters = true;
+  LLVMStyle.BinPackArguments = true;
   LLVMStyle.BreakBeforeBinaryOperators = FormatStyle::BOS_None;
   LLVMStyle.BreakBeforeTernaryOperators = true;
   LLVMStyle.BreakBeforeBraces = FormatStyle::BS_Attach;
@@ -355,6 +358,7 @@ FormatStyle getLLVMStyle() {
   LLVMStyle.MaxEmptyLinesToKeep = 1;
   LLVMStyle.KeepEmptyLinesAtTheStartOfBlocks = true;
   LLVMStyle.NamespaceIndentation = FormatStyle::NI_None;
+  LLVMStyle.ObjCBlockIndentWidth = 2;
   LLVMStyle.ObjCSpaceAfterProperty = false;
   LLVMStyle.ObjCSpaceBeforeProtocolList = true;
   LLVMStyle.PointerAlignment = FormatStyle::PAS_Right;
@@ -407,6 +411,7 @@ FormatStyle getGoogleStyle(FormatStyle::LanguageKind Language) {
   GoogleStyle.PenaltyBreakBeforeFirstCallParameter = 1;
 
   if (Language == FormatStyle::LK_Java) {
+    GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_None;
     GoogleStyle.BreakBeforeBinaryOperators = FormatStyle::BOS_NonAssignment;
     GoogleStyle.ColumnLimit = 100;
     GoogleStyle.SpaceAfterCStyleCast = true;
@@ -414,6 +419,7 @@ FormatStyle getGoogleStyle(FormatStyle::LanguageKind Language) {
     GoogleStyle.BreakBeforeTernaryOperators = false;
     GoogleStyle.MaxEmptyLinesToKeep = 3;
     GoogleStyle.SpacesInContainerLiterals = false;
+    GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Inline;
   } else if (Language == FormatStyle::LK_Proto) {
     GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_None;
     GoogleStyle.SpacesInContainerLiterals = false;
@@ -459,6 +465,7 @@ FormatStyle getWebKitStyle() {
   Style.ColumnLimit = 0;
   Style.IndentWidth = 4;
   Style.NamespaceIndentation = FormatStyle::NI_Inner;
+  Style.ObjCBlockIndentWidth = 4;
   Style.ObjCSpaceAfterProperty = true;
   Style.PointerAlignment = FormatStyle::PAS_Left;
   Style.Standard = FormatStyle::LS_Cpp03;
@@ -1084,7 +1091,7 @@ private:
   /// \p IndentForLevel must contain the indent for the level \c l
   /// at \p IndentForLevel[l], or a value < 0 if the indent for
   /// that level is unknown.
-  unsigned getIndent(const std::vector<int> IndentForLevel, unsigned Level) {
+  unsigned getIndent(ArrayRef<int> IndentForLevel, unsigned Level) {
     if (IndentForLevel[Level] != -1)
       return IndentForLevel[Level];
     if (Level == 0)
@@ -1274,6 +1281,9 @@ private:
       return true;
     }
 
+    if (Previous.Children[0]->First->MustBreakBefore)
+      return false;
+
     // Cannot merge multiple statements into a single line.
     if (Previous.Children.size() > 1)
       return false;
@@ -1324,10 +1334,10 @@ public:
   FormatTokenLexer(SourceManager &SourceMgr, FileID ID, FormatStyle &Style,
                    encoding::Encoding Encoding)
       : FormatTok(nullptr), IsFirstToken(true), GreaterStashed(false),
-        Column(0), TrailingWhitespace(0),
-        SourceMgr(SourceMgr), ID(ID), Style(Style),
-        IdentTable(getFormattingLangOpts(Style)), Encoding(Encoding),
-        FirstInLineIndex(0), FormattingDisabled(false) {
+        Column(0), TrailingWhitespace(0), SourceMgr(SourceMgr), ID(ID),
+        Style(Style), IdentTable(getFormattingLangOpts(Style)),
+        Keywords(IdentTable), Encoding(Encoding), FirstInLineIndex(0),
+        FormattingDisabled(false) {
     Lex.reset(new Lexer(ID, SourceMgr.getBuffer(ID), SourceMgr,
                         getFormattingLangOpts(Style)));
     Lex->SetKeepWhitespaceMode(true);
@@ -1349,7 +1359,7 @@ public:
     return Tokens;
   }
 
-  IdentifierTable &getIdentTable() { return IdentTable; }
+  const AdditionalKeywords &getKeywords() { return Keywords; }
 
 private:
   void tryMergePreviousTokens() {
@@ -1410,14 +1420,14 @@ private:
     if (Tokens.size() < 2)
       return false;
     FormatToken *Previous = Tokens[Tokens.size() - 2];
-    if (Previous->isNot(tok::unknown) || Previous->TokenText != "\\" ||
-        Tokens.back()->NewlinesBefore != 0)
+    if (Previous->isNot(tok::unknown) || Previous->TokenText != "\\")
       return false;
-    Previous->ColumnWidth += Tokens.back()->ColumnWidth;
+    ++Previous->ColumnWidth;
     StringRef Text = Previous->TokenText;
-    Previous->TokenText =
-        StringRef(Text.data(), Text.size() + Tokens.back()->TokenText.size());
+    Previous->TokenText = StringRef(Text.data(), Text.size() + 1);
+    resetLexer(SourceMgr.getFileOffset(Tokens.back()->Tok.getLocation()) + 1);
     Tokens.resize(Tokens.size() - 1);
+    Column = Previous->OriginalColumn + Previous->ColumnWidth;
     return true;
   }
 
@@ -1450,15 +1460,10 @@ private:
                          tok::question, tok::kw_return) ||
            I[1]->isBinaryOperator())) {
         if (MightEndWithEscapedSlash) {
-          StringRef Buffer = SourceMgr.getBufferData(ID);
           // This regex literal ends in '\//'. Skip past the '//' of the last
           // token and re-start lexing from there.
-          int offset =
-              SourceMgr.getFileOffset(Tokens.back()->Tok.getLocation()) + 2;
-          Lex.reset(new Lexer(SourceMgr.getLocForStartOfFile(ID),
-                              getFormattingLangOpts(Style), Buffer.begin(),
-                              Buffer.begin() + offset, Buffer.end()));
-          Lex->SetKeepWhitespaceMode(true);
+          SourceLocation Loc = Tokens.back()->Tok.getLocation();
+          resetLexer(SourceMgr.getFileOffset(Loc) + 2);
         }
         Tokens.resize(Tokens.size() - TokenCount);
         Tokens.back()->Tok.setKind(tok::unknown);
@@ -1717,6 +1722,7 @@ private:
   FileID ID;
   FormatStyle &Style;
   IdentifierTable IdentTable;
+  AdditionalKeywords Keywords;
   encoding::Encoding Encoding;
   llvm::SpecificBumpPtrAllocator<FormatToken> Allocator;
   // Index (in 'Tokens') of the last token that starts a new line.
@@ -1754,6 +1760,14 @@ private:
       FormattingDisabled = true;
     }
   }
+
+  void resetLexer(unsigned Offset) {
+    StringRef Buffer = SourceMgr.getBufferData(ID);
+    Lex.reset(new Lexer(SourceMgr.getLocForStartOfFile(ID),
+                        getFormattingLangOpts(Style), Buffer.begin(),
+                        Buffer.begin() + Offset, Buffer.end()));
+    Lex->SetKeepWhitespaceMode(true);
+  }
 };
 
 static StringRef getLanguageName(FormatStyle::LanguageKind Language) {
@@ -1774,7 +1788,7 @@ static StringRef getLanguageName(FormatStyle::LanguageKind Language) {
 class Formatter : public UnwrappedLineConsumer {
 public:
   Formatter(const FormatStyle &Style, SourceManager &SourceMgr, FileID ID,
-            const std::vector<CharSourceRange> &Ranges)
+            ArrayRef<CharSourceRange> Ranges)
       : Style(Style), ID(ID), SourceMgr(SourceMgr),
         Whitespaces(SourceMgr, Style,
                     inputUsesCRLF(SourceMgr.getBufferData(ID))),
@@ -1792,7 +1806,8 @@ public:
     tooling::Replacements Result;
     FormatTokenLexer Tokens(SourceMgr, ID, Style, Encoding);
 
-    UnwrappedLineParser Parser(Style, Tokens.lex(), *this);
+    UnwrappedLineParser Parser(Style, Tokens.getKeywords(), Tokens.lex(),
+                               *this);
     bool StructuralError = Parser.parse();
     assert(UnwrappedLines.rbegin()->empty());
     for (unsigned Run = 0, RunE = UnwrappedLines.size(); Run + 1 != RunE;
@@ -1823,7 +1838,7 @@ public:
 
   tooling::Replacements format(SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
                                bool StructuralError, FormatTokenLexer &Tokens) {
-    TokenAnnotator Annotator(Style, Tokens.getIdentTable().get("in"));
+    TokenAnnotator Annotator(Style, Tokens.getKeywords());
     for (unsigned i = 0, e = AnnotatedLines.size(); i != e; ++i) {
       Annotator.annotate(*AnnotatedLines[i]);
     }
@@ -1834,7 +1849,8 @@ public:
     computeAffectedLines(AnnotatedLines.begin(), AnnotatedLines.end());
 
     Annotator.setCommentLineLevels(AnnotatedLines);
-    ContinuationIndenter Indenter(Style, SourceMgr, Whitespaces, Encoding,
+    ContinuationIndenter Indenter(Style, Tokens.getKeywords(), SourceMgr,
+                                  Whitespaces, Encoding,
                                   BinPackInconclusiveFunctions);
     UnwrappedLineFormatter Formatter(&Indenter, &Whitespaces, Style);
     Formatter.format(AnnotatedLines, /*DryRun=*/false);
@@ -1949,8 +1965,7 @@ private:
     if (!IncludeLeadingNewlines)
       Start = Start.getLocWithOffset(First.LastNewlineOffset);
     SourceLocation End = Last.getStartOfNonWhitespace();
-    if (Last.TokenText.size() > 0)
-      End = End.getLocWithOffset(Last.TokenText.size() - 1);
+    End = End.getLocWithOffset(Last.TokenText.size());
     CharSourceRange Range = CharSourceRange::getCharRange(Start, End);
     return affectsCharSourceRange(Range);
   }
@@ -2058,7 +2073,7 @@ private:
 
 tooling::Replacements reformat(const FormatStyle &Style, Lexer &Lex,
                                SourceManager &SourceMgr,
-                               std::vector<CharSourceRange> Ranges) {
+                               ArrayRef<CharSourceRange> Ranges) {
   if (Style.DisableFormat)
     return tooling::Replacements();
   return reformat(Style, SourceMgr,
@@ -2067,7 +2082,7 @@ tooling::Replacements reformat(const FormatStyle &Style, Lexer &Lex,
 
 tooling::Replacements reformat(const FormatStyle &Style,
                                SourceManager &SourceMgr, FileID ID,
-                               std::vector<CharSourceRange> Ranges) {
+                               ArrayRef<CharSourceRange> Ranges) {
   if (Style.DisableFormat)
     return tooling::Replacements();
   Formatter formatter(Style, SourceMgr, ID, Ranges);
@@ -2075,7 +2090,7 @@ tooling::Replacements reformat(const FormatStyle &Style,
 }
 
 tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
-                               std::vector<tooling::Range> Ranges,
+                               ArrayRef<tooling::Range> Ranges,
                                StringRef FileName) {
   if (Style.DisableFormat)
     return tooling::Replacements();
@@ -2094,9 +2109,9 @@ tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
       SourceMgr.createFileID(Entry, SourceLocation(), clang::SrcMgr::C_User);
   SourceLocation StartOfFile = SourceMgr.getLocForStartOfFile(ID);
   std::vector<CharSourceRange> CharRanges;
-  for (unsigned i = 0, e = Ranges.size(); i != e; ++i) {
-    SourceLocation Start = StartOfFile.getLocWithOffset(Ranges[i].getOffset());
-    SourceLocation End = Start.getLocWithOffset(Ranges[i].getLength());
+  for (const tooling::Range &Range : Ranges) {
+    SourceLocation Start = StartOfFile.getLocWithOffset(Range.getOffset());
+    SourceLocation End = Start.getLocWithOffset(Range.getLength());
     CharRanges.push_back(CharSourceRange::getCharRange(Start, End));
   }
   return reformat(Style, SourceMgr, ID, CharRanges);
