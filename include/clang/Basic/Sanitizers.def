@@ -37,6 +37,8 @@
 #define SANITIZER_GROUP(NAME, ID, ALIAS)
 #endif
 
+// InstrumentMOP
+SANITIZER("mop", MOP)
 
 // AddressSanitizer
 SANITIZER("address", Address)

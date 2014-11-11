@@ -185,6 +185,11 @@ static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
   PM.add(createAddressSanitizerModulePass());
 }
 
+static void addInstrumentMOPPasses(const PassManagerBuilder &Builder,
+                                      PassManagerBase &PM) {
+  PM.add(createInstrumentMOPFunctionPass());
+}
+
 static void addMemorySanitizerPass(const PassManagerBuilder &Builder,
                                    PassManagerBase &PM) {
   const PassManagerBuilderWrapper &BuilderWrapper =
@@ -278,6 +283,13 @@ void EmitAssemblyHelper::CreatePasses() {
                            addAddressSanitizerPasses);
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
                            addAddressSanitizerPasses);
+  }
+
+  if (LangOpts.Sanitize.MOP) {
+    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
+                           addInstrumentMOPPasses);
+    PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                           addInstrumentMOPPasses);
   }
 
   if (LangOpts.Sanitize.Memory) {
